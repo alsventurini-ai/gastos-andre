@@ -1,0 +1,9 @@
+{
+  "name": "Controle de Gastos Pessoais — André",
+  "short_name": "Gastos André",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#EFEDE4",
+  "theme_color": "#20304A",
+  "icons": []
+}
