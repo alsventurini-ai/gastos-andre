@@ -289,10 +289,16 @@
         <label>Data da compra</label>
         <input type="date" id="bcDate">
       </div>
+      <div class="fgroup">
+        <label>Ver só este cartão (opcional)</label>
+        <select id="bcCardFilter">
+          <option value="">Todos os cartões (ranking)</option>
+        </select>
+      </div>
     </div>
     <div class="catsub" style="margin-bottom:12px;">
-      Mostra, pra cada cartão cadastrado, em qual fatura a compra cairia nessa data e quantos dias
-      até o vencimento — do maior prazo pro menor. O primeiro da lista é o que te dá mais tempo pra pagar.
+      Deixe em "Todos os cartões" pra ver o ranking de qual te dá mais prazo. Ou escolha um cartão
+      específico pra ver só a data em que a compra cairia nele.
     </div>
     <table>
       <thead>
@@ -687,6 +693,9 @@ function startListeningCards(){
     populateCardSelects();
     if(document.getElementById('cardsOverlay').style.display === 'flex'){
       renderCardsList();
+    }
+    if(document.getElementById('corriqueirosOverlay').style.display === 'flex'){
+      renderCorriqueiros();
     }
   });
 }
@@ -1098,14 +1107,30 @@ function daysBetween(dateStr1, dateStr2){
   const d2 = new Date(parseInt(p2[0]), parseInt(p2[1])-1, parseInt(p2[2]));
   return Math.round((d2 - d1) / (1000*60*60*24));
 }
+function populateBcCardFilter(){
+  const sel = document.getElementById('bcCardFilter');
+  const prevValue = sel.value;
+  sel.innerHTML = '<option value="">Todos os cartões (ranking)</option>';
+  Object.values(cardSettingsCache).sort((a,b)=>a.name.localeCompare(b.name)).forEach(c=>{
+    const opt = document.createElement('option');
+    opt.value = c.name;
+    opt.textContent = c.name;
+    sel.appendChild(opt);
+  });
+  if(Array.from(sel.options).some(o=>o.value===prevValue)) sel.value = prevValue;
+}
 function renderBestCard(){
   const purchaseDate = document.getElementById('bcDate').value;
   const tbody = document.getElementById('bcRows');
   if(!purchaseDate){ tbody.innerHTML = ''; return; }
-  const entries = Object.values(cardSettingsCache);
+  const filterName = document.getElementById('bcCardFilter').value;
+  let entries = Object.values(cardSettingsCache);
   if(entries.length === 0){
     tbody.innerHTML = '<tr><td colspan="3" class="empty">Nenhum cartão cadastrado ainda. Cadastre em "Gerenciar Cartões".</td></tr>';
     return;
+  }
+  if(filterName){
+    entries = entries.filter(c=>c.name===filterName);
   }
   const results = entries.map(c=>{
     const dueDate = computeCardPaymentDate(purchaseDate, c.closingDay, c.dueDay);
@@ -1114,9 +1139,9 @@ function renderBestCard(){
   });
   results.sort((a,b)=> b.prazo - a.prazo);
   tbody.innerHTML = results.map((r,i)=>{
-    const highlight = i===0 ? 'background:#EAF3EC;font-weight:700;' : '';
+    const highlight = (!filterName && i===0) ? 'background:#EAF3EC;font-weight:700;' : '';
     return '<tr style="'+highlight+'">'+
-      '<td>'+(i===0?'⭐ ':'')+r.name+'</td>'+
+      '<td>'+(!filterName && i===0?'⭐ ':'')+r.name+'</td>'+
       '<td class="datecell">'+fmtDateShort(r.dueDate)+'</td>'+
       '<td class="valor">'+r.prazo+' dias</td>'+
     '</tr>';
@@ -1126,6 +1151,7 @@ document.getElementById('btnBestCard').addEventListener('click', ()=>{
   if(!document.getElementById('bcDate').value){
     document.getElementById('bcDate').value = new Date().toISOString().slice(0,10);
   }
+  populateBcCardFilter();
   renderBestCard();
   document.getElementById('bestCardOverlay').style.display = 'flex';
 });
@@ -1133,6 +1159,8 @@ document.getElementById('bestCardClose').addEventListener('click', ()=>{
   document.getElementById('bestCardOverlay').style.display = 'none';
 });
 document.getElementById('bcDate').addEventListener('change', renderBestCard);
+document.getElementById('bcCardFilter').addEventListener('change', renderBestCard);
+
 
 document.getElementById('btnCards').addEventListener('click', openCardsManager);
 document.getElementById('cardsClose').addEventListener('click', ()=>{
