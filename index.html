@@ -91,6 +91,10 @@
     body.printing-detail .wrap{display:none !important;}
     body.printing-detail #detailOverlay{display:flex !important;position:static !important;background:none !important;inset:auto !important;}
     body.printing-detail #detailBox{border:none !important;box-shadow:none !important;max-height:none !important;overflow:visible !important;width:100% !important;max-width:100% !important;padding:0 !important;}
+
+    body.printing-recorrentes .wrap{display:none !important;}
+    body.printing-recorrentes #corriqueirosOverlay{display:flex !important;position:static !important;background:none !important;inset:auto !important;}
+    body.printing-recorrentes #corBox{border:none !important;box-shadow:none !important;max-height:none !important;overflow:visible !important;width:100% !important;max-width:100% !important;padding:0 !important;}
   }
 </style>
 </head>
@@ -130,6 +134,7 @@
     <button class="btn-print no-print" id="btnCards" style="background:var(--carlos);">Gerenciar Cartões</button>
     <button class="btn-print no-print" id="btnBestCard" style="background:var(--gold);">Qual Cartão Usar?</button>
     <button class="btn-print no-print" id="btnCorriqueiros" style="background:var(--familia);">Recorrentes</button>
+    <button class="btn-print no-print" id="btnNotify" style="background:#6B3FA0;">Ativar Notificações</button>
     <button class="btn-print no-print" id="btnCategories" style="background:var(--outros);">Gerenciar Categorias</button>
     <button class="btn-print no-print" id="btnBackup" style="background:var(--familia);">Backup Geral</button>
     <button class="btn-print no-print" id="btnRestore" style="background:var(--lilian);">Restaurar Backup</button>
@@ -299,15 +304,25 @@
 </div>
 
 <div id="corriqueirosOverlay" class="no-print" style="position:fixed;inset:0;background:rgba(32,48,74,.55);z-index:50;align-items:center;justify-content:center;display:none;">
-  <div style="background:#F7F5EC;border:2px solid var(--ink);padding:20px;max-width:720px;width:96%;max-height:86vh;overflow:auto;">
+  <div id="corBox" style="background:#F7F5EC;border:2px solid var(--ink);padding:20px;max-width:720px;width:96%;max-height:86vh;overflow:auto;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
       <h3 style="margin:0;font-family:'Courier New',monospace;font-size:14px;text-transform:uppercase;letter-spacing:1px;">Recorrentes · <span id="corMonthLabel"></span></h3>
-      <button class="del" id="corriqueirosClose" style="font-size:13px;">fechar ✕</button>
+      <div class="no-print" style="display:flex;gap:8px;">
+        <button class="btn-print" id="corPrintBtn" style="margin-left:0;">Imprimir / PDF</button>
+        <button class="del" id="corriqueirosClose" style="font-size:13px;">fechar ✕</button>
+      </div>
     </div>
     <div class="monthnav" style="margin-bottom:12px;">
       <button id="corPrevMonth" class="navbtn">‹</button>
       <div class="mname" id="corMonthName" style="font-size:14px;">—</div>
       <button id="corNextMonth" class="navbtn">›</button>
+      <div class="viewmode" id="corViewMode" style="margin-left:auto;">
+        <div data-mode="month" class="active">Por Mês</div>
+        <div data-mode="grouped">Agrupado</div>
+      </div>
+    </div>
+    <div id="corGroupedBackRow" class="hide" style="margin-bottom:10px;">
+      <button class="del" id="corGroupedBack">‹ voltar pra lista de itens</button>
     </div>
     <table>
       <thead>
@@ -802,47 +817,158 @@ async function deleteCard(key){
   if(!confirm('Excluir este cartão da lista? (Os gastos já lançados com ele não são afetados.)')) return;
   await cardSettingsRef.doc(key).delete();
 }
-/* ---------- GASTOS CORRIQUEIROS (RECORRENTES) ---------- */
-let corViewDate = new Date(); corViewDate.setDate(1);
-function renderCorriqueiros(){
-  const vKey = toKey(corViewDate);
-  document.getElementById('corMonthName').textContent = monthLabel(corViewDate);
-  document.getElementById('corMonthLabel').textContent = monthLabel(corViewDate);
-  const items = expenses.filter(e=> e.recurring && e.date.slice(0,7)===vKey)
-    .sort((a,b)=> a.establishment.localeCompare(b.establishment));
-  const tbody = document.getElementById('corRows');
-  if(items.length===0){
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum gasto recorrente previsto para este mês.</td></tr>';
+/* ---------- NOTIFICAÇÕES ---------- */
+document.getElementById('btnNotify').addEventListener('click', async ()=>{
+  if(!('Notification' in window)){
+    alert('Seu navegador não suporta notificações.');
     return;
   }
-  const PAY_OPTIONS = ["Dinheiro","Cartão de Crédito","Boleto","PIX","Transferência","Marcado"];
-  tbody.innerHTML = items.map(e=>{
-    const isConfirmed = e.confirmed !== false;
-    if(isConfirmed){
-      return '<tr>'+
-        '<td><span class="cat-dot" style="background:'+getCatColor(e.category)+';"></span>'+getCatName(e.category)+'</td>'+
-        '<td>'+e.establishment+'</td>'+
-        '<td class="valor">'+fmtMoney(e.amount)+'</td>'+
-        '<td class="datecell">'+fmtDateShort(e.date)+'</td>'+
-        '<td class="pay">'+e.paymentMethod+'</td>'+
-        '<td class="datecell">'+fmtDateShort(e.date)+'</td>'+
-        '<td><span style="color:var(--familia);font-family:\'Courier New\',monospace;font-size:11px;">✓ Pago</span> '+
-          '<button class="del" onclick="reabrirCorriqueiro(\''+e.id+'\')">editar</button></td>'+
-      '</tr>';
+  const perm = await Notification.requestPermission();
+  if(perm === 'granted'){
+    alert('Notificações ativadas! Elas vão disparar sempre que você abrir o app e houver um recorrente vencendo em até 2 dias úteis.');
+    checkUpcomingRecurringNotifications();
+  } else {
+    alert('Permissão não concedida. Sem isso, não dá pra mostrar notificações.');
+  }
+});
+function isWeekend(dateStr){
+  const p = dateStr.split("-");
+  const d = new Date(parseInt(p[0]), parseInt(p[1])-1, parseInt(p[2]));
+  const day = d.getDay();
+  return day === 0 || day === 6;
+}
+function businessDaysBetween(fromStr, toStr){
+  const p1 = fromStr.split("-"), p2 = toStr.split("-");
+  let d1 = new Date(parseInt(p1[0]), parseInt(p1[1])-1, parseInt(p1[2]));
+  const d2 = new Date(parseInt(p2[0]), parseInt(p2[1])-1, parseInt(p2[2]));
+  if(d2 < d1) return -1;
+  let count = 0;
+  const cur = new Date(d1);
+  while(cur < d2){
+    cur.setDate(cur.getDate()+1);
+    const day = cur.getDay();
+    if(day !== 0 && day !== 6) count++;
+  }
+  return count;
+}
+function checkUpcomingRecurringNotifications(){
+  if(!('Notification' in window) || Notification.permission !== 'granted') return;
+  const todayStr = new Date().toISOString().slice(0,10);
+  const pendentes = expenses.filter(e=> e.recurring && e.confirmed === false);
+  pendentes.forEach(e=>{
+    const dias = businessDaysBetween(todayStr, e.date);
+    if(dias >= 0 && dias <= 2){
+      new Notification('Recorrente vencendo em breve', {
+        body: e.establishment+' — '+fmtMoney(e.amount)+' — vence em '+fmtDateShort(e.date)+' ('+dias+' dia(s) útil(eis))',
+        tag: 'rec-'+e.id
+      });
     }
-    const paySelect = '<select id="corPay_'+e.id+'">'+
-      PAY_OPTIONS.map(p=>'<option value="'+p+'"'+(p===e.paymentMethod?' selected':'')+'>'+p+'</option>').join('')+
-      '</select>';
+  });
+}
+
+/* ---------- GASTOS CORRIQUEIROS (RECORRENTES) ---------- */
+let corViewDate = new Date(); corViewDate.setDate(1);
+let corMode = 'month'; // 'month' | 'grouped' | 'groupDetail'
+let corSelectedGroupId = null;
+const PAY_OPTIONS = ["Dinheiro","Cartão de Crédito","Boleto","PIX","Transferência","Marcado"];
+
+function renderRecurrenceRow(e){
+  const isConfirmed = e.confirmed !== false;
+  if(isConfirmed){
     return '<tr>'+
       '<td><span class="cat-dot" style="background:'+getCatColor(e.category)+';"></span>'+getCatName(e.category)+'</td>'+
-      '<td>'+e.establishment+'</td>'+
+      '<td>'+e.establishment+(e.installmentsTotal>1?' <span class="autor">('+e.installmentNumber+'/'+e.installmentsTotal+')</span>':'')+'</td>'+
       '<td class="valor">'+fmtMoney(e.amount)+'</td>'+
       '<td class="datecell">'+fmtDateShort(e.date)+'</td>'+
-      '<td>'+paySelect+'</td>'+
-      '<td><input type="date" id="corDate_'+e.id+'" value="'+e.date+'"></td>'+
-      '<td><button class="btn-add" style="padding:4px 10px;font-size:10px;margin-top:0;" onclick="confirmarPagamento(\''+e.id+'\')">Confirmar Pagamento</button></td>'+
+      '<td class="pay">'+e.paymentMethod+'</td>'+
+      '<td class="datecell">'+fmtDateShort(e.date)+'</td>'+
+      '<td><span style="color:var(--familia);font-family:\'Courier New\',monospace;font-size:11px;">✓ Pago</span> '+
+        '<button class="del" onclick="reabrirCorriqueiro(\''+e.id+'\')">editar</button></td>'+
     '</tr>';
-  }).join('');
+  }
+  const paySelect = '<select id="corPay_'+e.id+'">'+
+    PAY_OPTIONS.map(p=>'<option value="'+p+'"'+(p===e.paymentMethod?' selected':'')+'>'+p+'</option>').join('')+
+    '</select>';
+  return '<tr>'+
+    '<td><span class="cat-dot" style="background:'+getCatColor(e.category)+';"></span>'+getCatName(e.category)+'</td>'+
+    '<td>'+e.establishment+(e.installmentsTotal>1?' <span class="autor">('+e.installmentNumber+'/'+e.installmentsTotal+')</span>':'')+'</td>'+
+    '<td class="valor">'+fmtMoney(e.amount)+'</td>'+
+    '<td class="datecell">'+fmtDateShort(e.date)+'</td>'+
+    '<td>'+paySelect+'</td>'+
+    '<td><input type="date" id="corDate_'+e.id+'" value="'+e.date+'"></td>'+
+    '<td><button class="btn-add" style="padding:4px 10px;font-size:10px;margin-top:0;" onclick="confirmarPagamento(\''+e.id+'\')">Confirmar Pagamento</button></td>'+
+  '</tr>';
+}
+
+function renderCorriqueiros(){
+  document.getElementById('corGroupedBackRow').classList.toggle('hide', corMode !== 'groupDetail');
+  document.getElementById('corPrevMonth').classList.toggle('hide', corMode !== 'month');
+  document.getElementById('corNextMonth').classList.toggle('hide', corMode !== 'month');
+
+  if(corMode === 'month'){
+    document.getElementById('corMonthName').textContent = monthLabel(corViewDate);
+    document.getElementById('corMonthLabel').textContent = monthLabel(corViewDate);
+    const vKey = toKey(corViewDate);
+    const items = expenses.filter(e=> e.recurring && e.date.slice(0,7)===vKey)
+      .sort((a,b)=> a.establishment.localeCompare(b.establishment));
+    const tbody = document.getElementById('corRows');
+    if(items.length===0){
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum gasto recorrente previsto para este mês.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = items.map(renderRecurrenceRow).join('');
+  }
+  else if(corMode === 'grouped'){
+    document.getElementById('corMonthName').textContent = 'Todos os itens recorrentes';
+    document.getElementById('corMonthLabel').textContent = 'visão agrupada';
+    const groups = {};
+    expenses.filter(e=>e.recurring).forEach(e=>{
+      if(!groups[e.groupId]) groups[e.groupId] = [];
+      groups[e.groupId].push(e);
+    });
+    const tbody = document.getElementById('corRows');
+    const groupIds = Object.keys(groups);
+    if(groupIds.length===0){
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum gasto recorrente cadastrado ainda.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = groupIds.map(gid=>{
+      const items = groups[gid].sort((a,b)=>a.date.localeCompare(b.date));
+      const first = items[0];
+      const total = items.length;
+      const confirmados = items.filter(e=>e.confirmed!==false).length;
+      const pendentes = total - confirmados;
+      const totalValor = items.reduce((s,e)=>s+e.amount,0);
+      const tipoTxt = first.recurringType === 'determinado' ? total+'x' : 'indeterminado';
+      return '<tr style="cursor:pointer;" onclick="abrirGrupoRecorrente(\''+gid+'\')">'+
+        '<td><span class="cat-dot" style="background:'+getCatColor(first.category)+';"></span>'+getCatName(first.category)+'</td>'+
+        '<td>'+first.establishment+' <span class="autor">('+tipoTxt+')</span></td>'+
+        '<td class="valor">'+fmtMoney(first.amount)+'/mês</td>'+
+        '<td class="datecell">'+confirmados+' pagos</td>'+
+        '<td class="datecell">'+pendentes+' pendentes</td>'+
+        '<td class="valor">'+fmtMoney(totalValor)+' total</td>'+
+        '<td><button class="del">ver detalhes</button></td>'+
+      '</tr>';
+    }).join('');
+  }
+  else if(corMode === 'groupDetail'){
+    const items = expenses.filter(e=>e.recurring && e.groupId===corSelectedGroupId)
+      .sort((a,b)=>a.date.localeCompare(b.date));
+    const name = items.length ? items[0].establishment : 'Item';
+    document.getElementById('corMonthName').textContent = name;
+    document.getElementById('corMonthLabel').textContent = name;
+    const tbody = document.getElementById('corRows');
+    if(items.length===0){
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhuma ocorrência encontrada.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = items.map(renderRecurrenceRow).join('');
+  }
+}
+function abrirGrupoRecorrente(groupId){
+  corSelectedGroupId = groupId;
+  corMode = 'groupDetail';
+  renderCorriqueiros();
 }
 async function confirmarPagamento(id){
   const paymentMethod = document.getElementById('corPay_'+id).value;
@@ -864,6 +990,9 @@ async function reabrirCorriqueiro(id){
 }
 document.getElementById('btnCorriqueiros').addEventListener('click', ()=>{
   corViewDate = new Date(viewDate);
+  corMode = 'month';
+  document.querySelectorAll('#corViewMode div').forEach(x=>x.classList.remove('active'));
+  document.querySelector('#corViewMode div[data-mode="month"]').classList.add('active');
   renderCorriqueiros();
   document.getElementById('corriqueirosOverlay').style.display = 'flex';
 });
@@ -875,6 +1004,18 @@ document.getElementById('corPrevMonth').addEventListener('click', ()=>{
 });
 document.getElementById('corNextMonth').addEventListener('click', ()=>{
   corViewDate.setMonth(corViewDate.getMonth()+1); renderCorriqueiros();
+});
+document.getElementById('corViewMode').addEventListener('click', (e)=>{
+  const t = e.target.closest('div[data-mode]'); if(!t) return;
+  corMode = t.dataset.mode;
+  document.querySelectorAll('#corViewMode div').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  renderCorriqueiros();
+});
+document.getElementById('corGroupedBack').addEventListener('click', ()=>{
+  corMode = 'grouped';
+  corSelectedGroupId = null;
+  renderCorriqueiros();
 });
 
 /* ---------- QUAL CARTÃO USAR ---------- */
@@ -965,6 +1106,7 @@ function startListening(){
       expenses.push(d);
     });
     render();
+    checkUpcomingRecurringNotifications();
     if(document.getElementById('corriqueirosOverlay').style.display === 'flex'){
       renderCorriqueiros();
     }
@@ -1130,16 +1272,30 @@ document.getElementById('btnAdd').addEventListener('click', async ()=>{
 });
 
 async function deleteExpense(id, groupId, all){
+  const target = expenses.find(e=>e.id===id);
+  const isRec = target && target.recurring;
   if(all){
-    if(!confirm('Excluir este e todos os lançamentos futuros deste grupo (parcelas/recorrência)?')) return;
-    const target = expenses.find(e=>e.id===id);
-    const toDelete = expenses.filter(e=> e.groupId===groupId && e.installmentNumber >= target.installmentNumber);
+    const msg = isRec
+      ? 'Isso vai devolver este e os lançamentos futuros deste recorrente para a aba "Recorrentes", como pendentes de confirmação. Continuar?'
+      : 'Excluir este e todos os lançamentos futuros deste grupo (parcelas)?';
+    if(!confirm(msg)) return;
+    const toChange = expenses.filter(e=> e.groupId===groupId && e.installmentNumber >= target.installmentNumber);
     const batch = db.batch();
-    toDelete.forEach(e=> batch.delete(expensesRef.doc(e.id)));
+    toChange.forEach(e=>{
+      if(isRec){ batch.update(expensesRef.doc(e.id), {confirmed:false}); }
+      else { batch.delete(expensesRef.doc(e.id)); }
+    });
     await batch.commit();
   } else {
-    if(!confirm('Excluir este lançamento?')) return;
-    await expensesRef.doc(id).delete();
+    const msg = isRec
+      ? 'Isso vai devolver este lançamento para a aba "Recorrentes", como pendente de confirmação. Continuar?'
+      : 'Excluir este lançamento?';
+    if(!confirm(msg)) return;
+    if(isRec){
+      await expensesRef.doc(id).update({confirmed:false});
+    } else {
+      await expensesRef.doc(id).delete();
+    }
   }
 }
 
@@ -1349,6 +1505,11 @@ document.getElementById('detailPrintBtn').addEventListener('click', ()=>{
 });
 window.addEventListener('afterprint', ()=>{
   document.body.classList.remove('printing-detail');
+  document.body.classList.remove('printing-recorrentes');
+});
+document.getElementById('corPrintBtn').addEventListener('click', ()=>{
+  document.body.classList.add('printing-recorrentes');
+  window.print();
 });
 
 /* ---------- EDITAR ---------- */
