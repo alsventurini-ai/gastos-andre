@@ -343,6 +343,51 @@
       Só aparecem aqui os gastos marcados como "recorrente" no momento em que foram lançados.
       Preencha a "Data Real do Pagamento" quando efetivamente pagar cada parcela — fica salvo automaticamente.
     </div>
+
+    <div class="recbox no-print" style="margin-top:18px;">
+      <h3 style="font-family:'Courier New',monospace;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:0 0 10px;">Adicionar novo recorrente</h3>
+      <div class="frow">
+        <div class="fgroup">
+          <label>Categoria</label>
+          <select id="rcCat"></select>
+        </div>
+        <div class="fgroup grow">
+          <label>Estabelecimento</label>
+          <input type="text" id="rcEst" placeholder="Ex: Aluguel, Escola, Mensalidade academia...">
+        </div>
+      </div>
+      <div class="frow">
+        <div class="fgroup">
+          <label>Valor da parcela/mensalidade (R$)</label>
+          <input type="number" id="rcVal" step="0.01">
+        </div>
+        <div class="fgroup">
+          <label>Data de início (1ª cobrança)</label>
+          <input type="date" id="rcInicio">
+        </div>
+      </div>
+      <div class="frow">
+        <div class="fgroup">
+          <label>Duração</label>
+          <div style="display:flex;gap:16px;margin-top:6px;">
+            <label class="radio" style="display:flex;align-items:center;gap:6px;font-family:'Courier New',monospace;font-size:12px;cursor:pointer;">
+              <input type="radio" name="rcType" value="indeterminado" checked> Por tempo indeterminado
+            </label>
+            <label class="radio" style="display:flex;align-items:center;gap:6px;font-family:'Courier New',monospace;font-size:12px;cursor:pointer;">
+              <input type="radio" name="rcType" value="determinado"> Por tempo determinado
+            </label>
+          </div>
+        </div>
+        <div class="fgroup hide" id="rcMesesField">
+          <label>Número de parcelas</label>
+          <input type="number" id="rcMeses" min="1" max="60" value="12">
+        </div>
+      </div>
+      <button class="btn-add" id="rcSave">Adicionar Recorrente</button>
+      <div class="catsub" style="margin-top:6px;">
+        Já nasce como pendente — você escolhe a forma de pagamento (e o cartão, se for o caso) na hora de confirmar cada mês.
+      </div>
+    </div>
   </div>
 </div>
 
@@ -653,7 +698,7 @@ function renderCategoryTabs(){
   }
 }
 function populateCategorySelects(){
-  ['fCat','eCat'].forEach(id=>{
+  ['fCat','eCat','rcCat'].forEach(id=>{
     const sel = document.getElementById(id);
     const prevValue = sel.value;
     sel.innerHTML = '';
@@ -903,7 +948,7 @@ function renderRecurrenceRow(e){
     .concat(Object.values(cardSettingsCache).sort((a,b)=>a.name.localeCompare(b.name))
       .map(c=>'<option value="'+c.name+'"'+(c.name===e.cardName?' selected':'')+'>'+c.name+'</option>'))
     .join('');
-  const cardCell = '<select id="corCard_'+e.id+'" onchange="corOnCardChange(\''+e.id+'\')" '+(isCartao?'':'style="display:none;"')+'>'+cardOptions+'</select>'+
+  const cardCell = '<select id="corCard_'+e.id+'" onchange="corOnCardChange(\''+e.id+'\')">'+cardOptions+'</select>'+
     '<input type="text" id="corCardNew_'+e.id+'" placeholder="Nome do novo cartão" class="hide" style="margin-top:4px;">'+
     '<div style="margin-top:4px;display:flex;align-items:center;gap:4px;">'+
       '<label style="font-family:\'Courier New\',monospace;font-size:9px;color:var(--ink-soft);">Em quantas vezes:</label>'+
@@ -1098,6 +1143,54 @@ document.getElementById('corGroupedBack').addEventListener('click', ()=>{
   corMode = 'grouped';
   corSelectedGroupId = null;
   renderCorriqueiros();
+});
+
+/* ---------- ADICIONAR RECORRENTE MANUALMENTE ---------- */
+document.querySelectorAll('input[name=rcType]').forEach(r=>{
+  r.addEventListener('change', ()=>{
+    document.getElementById('rcMesesField').classList.toggle('hide',
+      document.querySelector('input[name=rcType]:checked').value !== 'determinado');
+  });
+});
+document.getElementById('rcSave').addEventListener('click', async ()=>{
+  const category = document.getElementById('rcCat').value;
+  const establishment = document.getElementById('rcEst').value.trim();
+  const val = parseFloat(document.getElementById('rcVal').value);
+  const startDate = document.getElementById('rcInicio').value;
+  const recType = document.querySelector('input[name=rcType]:checked').value;
+  const recMeses = parseInt(document.getElementById('rcMeses').value) || 12;
+
+  if(!establishment || isNaN(val) || val<=0 || !startDate){
+    alert('Preencha estabelecimento, valor e data de início.');
+    return;
+  }
+  const count = recType === 'determinado' ? recMeses : 36;
+  const groupId = genId();
+  try{
+    const batch = db.batch();
+    for(let i=0;i<count;i++){
+      const dDate = addMonthsToStr(startDate, i);
+      const docRef = expensesRef.doc();
+      batch.set(docRef, {
+        groupId, category, establishment,
+        paymentMethod: 'Dinheiro', cardName: '',
+        purchaseDate: dDate, date: dDate, amount: val,
+        totalAmount: val, installmentNumber: i+1, installmentsTotal: count,
+        isInstallmentGroup: false, recurring: true, recurringType: recType,
+        confirmed: false, createdAt: Date.now()
+      });
+    }
+    await batch.commit();
+  }catch(err){
+    alert('Erro ao criar recorrente: '+err.message);
+    return;
+  }
+  document.getElementById('rcEst').value = '';
+  document.getElementById('rcVal').value = '';
+  document.getElementById('rcInicio').value = '';
+  document.querySelector('input[name=rcType][value=indeterminado]').checked = true;
+  document.getElementById('rcMesesField').classList.add('hide');
+  alert('Recorrente criado! Ele já aparece na lista, pendente de confirmação mês a mês.');
 });
 
 /* ---------- QUAL CARTÃO USAR ---------- */
@@ -1565,6 +1658,7 @@ const today = new Date().toISOString().slice(0,10);
 document.getElementById('fPurchaseDate').value = today;
 document.getElementById('fPayDate').value = today;
 document.getElementById('fBoletoDue').value = today;
+document.getElementById('rcInicio').value = today;
 
 /* ---------- DETALHAMENTO DOS TOTAIS ---------- */
 const DETAIL_TITLES = {
