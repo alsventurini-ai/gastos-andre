@@ -880,24 +880,56 @@ function renderRecurrenceRow(e){
       '<td>'+e.establishment+(e.installmentsTotal>1?' <span class="autor">('+e.installmentNumber+'/'+e.installmentsTotal+')</span>':'')+'</td>'+
       '<td class="valor">'+fmtMoney(e.amount)+'</td>'+
       '<td class="datecell">'+fmtDateShort(e.date)+'</td>'+
-      '<td class="pay">'+e.paymentMethod+'</td>'+
+      '<td class="pay">'+e.paymentMethod+(e.cardName?' · '+e.cardName:'')+'</td>'+
       '<td class="datecell">'+fmtDateShort(e.date)+'</td>'+
       '<td><span style="color:var(--familia);font-family:\'Courier New\',monospace;font-size:11px;">✓ Pago</span> '+
         '<button class="del" onclick="reabrirCorriqueiro(\''+e.id+'\')">editar</button></td>'+
     '</tr>';
   }
-  const paySelect = '<select id="corPay_'+e.id+'">'+
+  const paySelect = '<select id="corPay_'+e.id+'" onchange="corOnPayChange(\''+e.id+'\')">'+
     PAY_OPTIONS.map(p=>'<option value="'+p+'"'+(p===e.paymentMethod?' selected':'')+'>'+p+'</option>').join('')+
     '</select>';
+  const isCartao = e.paymentMethod === 'Cartão de Crédito';
+  const cardOptions = ['<option value="">Selecione um cartão...</option>','<option value="__new__">+ Novo cartão...</option>']
+    .concat(Object.values(cardSettingsCache).sort((a,b)=>a.name.localeCompare(b.name))
+      .map(c=>'<option value="'+c.name+'"'+(c.name===e.cardName?' selected':'')+'>'+c.name+'</option>'))
+    .join('');
+  const cardCell = '<select id="corCard_'+e.id+'" onchange="corOnCardChange(\''+e.id+'\')" '+(isCartao?'':'style="display:none;"')+'>'+cardOptions+'</select>'+
+    '<input type="text" id="corCardNew_'+e.id+'" placeholder="Nome do novo cartão" class="hide" style="margin-top:4px;">'+
+    '<div style="margin-top:4px;display:flex;align-items:center;gap:4px;">'+
+      '<label style="font-family:\'Courier New\',monospace;font-size:9px;color:var(--ink-soft);">Em quantas vezes:</label>'+
+      '<input type="number" id="corParc_'+e.id+'" min="1" max="24" value="1" style="width:50px;">'+
+    '</div>';
   return '<tr>'+
     '<td><span class="cat-dot" style="background:'+getCatColor(e.category)+';"></span>'+getCatName(e.category)+'</td>'+
     '<td>'+e.establishment+(e.installmentsTotal>1?' <span class="autor">('+e.installmentNumber+'/'+e.installmentsTotal+')</span>':'')+'</td>'+
     '<td class="valor">'+fmtMoney(e.amount)+'</td>'+
     '<td class="datecell">'+fmtDateShort(e.date)+'</td>'+
-    '<td>'+paySelect+'</td>'+
+    '<td>'+paySelect+'<div id="corCardWrap_'+e.id+'" style="margin-top:4px;'+(isCartao?'':'display:none;')+'">'+cardCell+'</div></td>'+
     '<td><input type="date" id="corDate_'+e.id+'" value="'+e.date+'"></td>'+
     '<td><button class="btn-add" style="padding:4px 10px;font-size:10px;margin-top:0;" onclick="confirmarPagamento(\''+e.id+'\')">Confirmar Pagamento</button></td>'+
   '</tr>';
+}
+function corOnPayChange(id){
+  const method = document.getElementById('corPay_'+id).value;
+  const wrap = document.getElementById('corCardWrap_'+id);
+  wrap.style.display = method === 'Cartão de Crédito' ? 'block' : 'none';
+}
+function corOnCardChange(id){
+  const sel = document.getElementById('corCard_'+id);
+  const newInput = document.getElementById('corCardNew_'+id);
+  if(sel.value === '__new__'){
+    newInput.classList.remove('hide');
+    return;
+  }
+  newInput.classList.add('hide');
+  const found = cardSettingsCache[sanitizeCardKey(sel.value)];
+  if(found){
+    const e = expenses.find(x=>x.id===id);
+    const scheduledDate = e ? e.date : new Date().toISOString().slice(0,10);
+    const newDate = computeCardPaymentDate(scheduledDate, found.closingDay, found.dueDay);
+    document.getElementById('corDate_'+id).value = newDate;
+  }
 }
 
 function renderCorriqueiros(){
@@ -974,8 +1006,49 @@ async function confirmarPagamento(id){
   const paymentMethod = document.getElementById('corPay_'+id).value;
   const newDate = document.getElementById('corDate_'+id).value;
   if(!newDate){ alert('Escolha a data real do pagamento.'); return; }
+  let cardName = '';
+  let parcelas = 1;
+  if(paymentMethod === 'Cartão de Crédito'){
+    const cardSel = document.getElementById('corCard_'+id);
+    cardName = cardSel.value === '__new__' ? document.getElementById('corCardNew_'+id).value.trim() : cardSel.value;
+    if(!cardName){ alert('Escolha ou digite o cartão utilizado.'); return; }
+    parcelas = Math.max(1, parseInt(document.getElementById('corParc_'+id).value) || 1);
+  }
+  const e = expenses.find(x=>x.id===id);
+  if(!e) return;
+
   try{
-    await expensesRef.doc(id).update({ paymentMethod, date: newDate, confirmed: true });
+    if(parcelas > 1){
+      // vira um parcelamento de cartão de verdade: apaga este lancamento pendente
+      // e cria um novo grupo de X parcelas, sem mexer nos outros meses do recorrente original.
+      let firstPaymentDate = newDate;
+      const found = cardSettingsCache[sanitizeCardKey(cardName)];
+      if(found){
+        firstPaymentDate = computeCardPaymentDate(e.date, found.closingDay, found.dueDay);
+      }
+      const newGroupId = genId();
+      const batch = db.batch();
+      batch.delete(expensesRef.doc(id));
+      let allocated = 0;
+      for(let i=0;i<parcelas;i++){
+        const dDate = addMonthsToStr(firstPaymentDate, i);
+        let amount;
+        const rawPart = Math.round((e.amount/parcelas)*100)/100;
+        if(i===parcelas-1){ amount = Math.round((e.amount - allocated)*100)/100; } else { amount = rawPart; allocated += rawPart; }
+        const docRef = expensesRef.doc();
+        batch.set(docRef, {
+          groupId: newGroupId, category: e.category, establishment: e.establishment,
+          paymentMethod: 'Cartão de Crédito', cardName,
+          purchaseDate: e.date, date: dDate, amount,
+          totalAmount: e.amount, installmentNumber: i+1, installmentsTotal: parcelas,
+          isInstallmentGroup: true, recurring: false, recurringType: null,
+          confirmed: true, createdAt: Date.now()
+        });
+      }
+      await batch.commit();
+    } else {
+      await expensesRef.doc(id).update({ paymentMethod, date: newDate, cardName, confirmed: true });
+    }
   }catch(err){
     alert('Erro ao confirmar pagamento: '+err.message);
   }
