@@ -129,7 +129,7 @@
     <button class="btn-print no-print" id="btnPrint">Imprimir / Salvar PDF</button>
     <button class="btn-print no-print" id="btnCards" style="background:var(--carlos);">Gerenciar Cartões</button>
     <button class="btn-print no-print" id="btnBestCard" style="background:var(--gold);">Qual Cartão Usar?</button>
-    <button class="btn-print no-print" id="btnCorriqueiros" style="background:var(--familia);">Gastos Corriqueiros</button>
+    <button class="btn-print no-print" id="btnCorriqueiros" style="background:var(--familia);">Recorrentes</button>
     <button class="btn-print no-print" id="btnCategories" style="background:var(--outros);">Gerenciar Categorias</button>
     <button class="btn-print no-print" id="btnBackup" style="background:var(--familia);">Backup Geral</button>
     <button class="btn-print no-print" id="btnRestore" style="background:var(--lilian);">Restaurar Backup</button>
@@ -301,7 +301,7 @@
 <div id="corriqueirosOverlay" class="no-print" style="position:fixed;inset:0;background:rgba(32,48,74,.55);z-index:50;align-items:center;justify-content:center;display:none;">
   <div style="background:#F7F5EC;border:2px solid var(--ink);padding:20px;max-width:720px;width:96%;max-height:86vh;overflow:auto;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-      <h3 style="margin:0;font-family:'Courier New',monospace;font-size:14px;text-transform:uppercase;letter-spacing:1px;">Gastos Corriqueiros (recorrentes) · <span id="corMonthLabel"></span></h3>
+      <h3 style="margin:0;font-family:'Courier New',monospace;font-size:14px;text-transform:uppercase;letter-spacing:1px;">Recorrentes · <span id="corMonthLabel"></span></h3>
       <button class="del" id="corriqueirosClose" style="font-size:13px;">fechar ✕</button>
     </div>
     <div class="monthnav" style="margin-bottom:12px;">
@@ -812,7 +812,7 @@ function renderCorriqueiros(){
     .sort((a,b)=> a.establishment.localeCompare(b.establishment));
   const tbody = document.getElementById('corRows');
   if(items.length===0){
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum gasto corriqueiro (recorrente) previsto para este mês.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum gasto recorrente previsto para este mês.</td></tr>';
     return;
   }
   const PAY_OPTIONS = ["Dinheiro","Cartão de Crédito","Boleto","PIX","Transferência","Marcado"];
