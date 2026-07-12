@@ -128,6 +128,8 @@
     </div>
     <button class="btn-print no-print" id="btnPrint">Imprimir / Salvar PDF</button>
     <button class="btn-print no-print" id="btnCards" style="background:var(--carlos);">Gerenciar Cartões</button>
+    <button class="btn-print no-print" id="btnBestCard" style="background:var(--gold);">Qual Cartão Usar?</button>
+    <button class="btn-print no-print" id="btnCorriqueiros" style="background:var(--familia);">Gastos Corriqueiros</button>
     <button class="btn-print no-print" id="btnCategories" style="background:var(--outros);">Gerenciar Categorias</button>
     <button class="btn-print no-print" id="btnBackup" style="background:var(--familia);">Backup Geral</button>
     <button class="btn-print no-print" id="btnRestore" style="background:var(--lilian);">Restaurar Backup</button>
@@ -267,6 +269,58 @@
         Excluir uma categoria não apaga os gastos já lançados com ela — eles continuam
         existindo, só ficam sem nome/cor até você recategorizá-los (editando cada um).
       </div>
+    </div>
+  </div>
+</div>
+
+<div id="bestCardOverlay" class="no-print" style="position:fixed;inset:0;background:rgba(32,48,74,.55);z-index:50;align-items:center;justify-content:center;display:none;">
+  <div style="background:#F7F5EC;border:2px solid var(--ink);padding:20px;max-width:560px;width:94%;max-height:82vh;overflow:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3 style="margin:0;font-family:'Courier New',monospace;font-size:14px;text-transform:uppercase;letter-spacing:1px;">Qual cartão usar?</h3>
+      <button class="del" id="bestCardClose" style="font-size:13px;">fechar ✕</button>
+    </div>
+    <div class="frow">
+      <div class="fgroup">
+        <label>Data da compra</label>
+        <input type="date" id="bcDate">
+      </div>
+    </div>
+    <div class="catsub" style="margin-bottom:12px;">
+      Mostra, pra cada cartão cadastrado, em qual fatura a compra cairia nessa data e quantos dias
+      até o vencimento — do maior prazo pro menor. O primeiro da lista é o que te dá mais tempo pra pagar.
+    </div>
+    <table>
+      <thead>
+        <tr><th>Cartão</th><th>Cai na fatura de</th><th style="text-align:right;">Prazo</th></tr>
+      </thead>
+      <tbody id="bcRows"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="corriqueirosOverlay" class="no-print" style="position:fixed;inset:0;background:rgba(32,48,74,.55);z-index:50;align-items:center;justify-content:center;display:none;">
+  <div style="background:#F7F5EC;border:2px solid var(--ink);padding:20px;max-width:720px;width:96%;max-height:86vh;overflow:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3 style="margin:0;font-family:'Courier New',monospace;font-size:14px;text-transform:uppercase;letter-spacing:1px;">Gastos Corriqueiros (recorrentes) · <span id="corMonthLabel"></span></h3>
+      <button class="del" id="corriqueirosClose" style="font-size:13px;">fechar ✕</button>
+    </div>
+    <div class="monthnav" style="margin-bottom:12px;">
+      <button id="corPrevMonth" class="navbtn">‹</button>
+      <div class="mname" id="corMonthName" style="font-size:14px;">—</div>
+      <button id="corNextMonth" class="navbtn">›</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Categoria</th><th>Estabelecimento</th><th style="text-align:right;">Valor</th>
+          <th>Data Prevista</th><th>Forma de Pagamento</th><th>Data Real do Pagamento</th><th>Situação</th>
+        </tr>
+      </thead>
+      <tbody id="corRows"></tbody>
+    </table>
+    <div class="catsub" style="margin-top:12px;">
+      Só aparecem aqui os gastos marcados como "recorrente" no momento em que foram lançados.
+      Preencha a "Data Real do Pagamento" quando efetivamente pagar cada parcela — fica salvo automaticamente.
     </div>
   </div>
 </div>
@@ -748,6 +802,124 @@ async function deleteCard(key){
   if(!confirm('Excluir este cartão da lista? (Os gastos já lançados com ele não são afetados.)')) return;
   await cardSettingsRef.doc(key).delete();
 }
+/* ---------- GASTOS CORRIQUEIROS (RECORRENTES) ---------- */
+let corViewDate = new Date(); corViewDate.setDate(1);
+function renderCorriqueiros(){
+  const vKey = toKey(corViewDate);
+  document.getElementById('corMonthName').textContent = monthLabel(corViewDate);
+  document.getElementById('corMonthLabel').textContent = monthLabel(corViewDate);
+  const items = expenses.filter(e=> e.recurring && e.date.slice(0,7)===vKey)
+    .sort((a,b)=> a.establishment.localeCompare(b.establishment));
+  const tbody = document.getElementById('corRows');
+  if(items.length===0){
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum gasto corriqueiro (recorrente) previsto para este mês.</td></tr>';
+    return;
+  }
+  const PAY_OPTIONS = ["Dinheiro","Cartão de Crédito","Boleto","PIX","Transferência","Marcado"];
+  tbody.innerHTML = items.map(e=>{
+    const isConfirmed = e.confirmed !== false;
+    if(isConfirmed){
+      return '<tr>'+
+        '<td><span class="cat-dot" style="background:'+getCatColor(e.category)+';"></span>'+getCatName(e.category)+'</td>'+
+        '<td>'+e.establishment+'</td>'+
+        '<td class="valor">'+fmtMoney(e.amount)+'</td>'+
+        '<td class="datecell">'+fmtDateShort(e.date)+'</td>'+
+        '<td class="pay">'+e.paymentMethod+'</td>'+
+        '<td class="datecell">'+fmtDateShort(e.date)+'</td>'+
+        '<td><span style="color:var(--familia);font-family:\'Courier New\',monospace;font-size:11px;">✓ Pago</span> '+
+          '<button class="del" onclick="reabrirCorriqueiro(\''+e.id+'\')">editar</button></td>'+
+      '</tr>';
+    }
+    const paySelect = '<select id="corPay_'+e.id+'">'+
+      PAY_OPTIONS.map(p=>'<option value="'+p+'"'+(p===e.paymentMethod?' selected':'')+'>'+p+'</option>').join('')+
+      '</select>';
+    return '<tr>'+
+      '<td><span class="cat-dot" style="background:'+getCatColor(e.category)+';"></span>'+getCatName(e.category)+'</td>'+
+      '<td>'+e.establishment+'</td>'+
+      '<td class="valor">'+fmtMoney(e.amount)+'</td>'+
+      '<td class="datecell">'+fmtDateShort(e.date)+'</td>'+
+      '<td>'+paySelect+'</td>'+
+      '<td><input type="date" id="corDate_'+e.id+'" value="'+e.date+'"></td>'+
+      '<td><button class="btn-add" style="padding:4px 10px;font-size:10px;margin-top:0;" onclick="confirmarPagamento(\''+e.id+'\')">Confirmar Pagamento</button></td>'+
+    '</tr>';
+  }).join('');
+}
+async function confirmarPagamento(id){
+  const paymentMethod = document.getElementById('corPay_'+id).value;
+  const newDate = document.getElementById('corDate_'+id).value;
+  if(!newDate){ alert('Escolha a data real do pagamento.'); return; }
+  try{
+    await expensesRef.doc(id).update({ paymentMethod, date: newDate, confirmed: true });
+  }catch(err){
+    alert('Erro ao confirmar pagamento: '+err.message);
+  }
+}
+async function reabrirCorriqueiro(id){
+  if(!confirm('Reabrir este pagamento? Ele volta a ficar pendente e some dos totais da aba principal até confirmar de novo.')) return;
+  try{
+    await expensesRef.doc(id).update({ confirmed: false });
+  }catch(err){
+    alert('Erro ao reabrir: '+err.message);
+  }
+}
+document.getElementById('btnCorriqueiros').addEventListener('click', ()=>{
+  corViewDate = new Date(viewDate);
+  renderCorriqueiros();
+  document.getElementById('corriqueirosOverlay').style.display = 'flex';
+});
+document.getElementById('corriqueirosClose').addEventListener('click', ()=>{
+  document.getElementById('corriqueirosOverlay').style.display = 'none';
+});
+document.getElementById('corPrevMonth').addEventListener('click', ()=>{
+  corViewDate.setMonth(corViewDate.getMonth()-1); renderCorriqueiros();
+});
+document.getElementById('corNextMonth').addEventListener('click', ()=>{
+  corViewDate.setMonth(corViewDate.getMonth()+1); renderCorriqueiros();
+});
+
+/* ---------- QUAL CARTÃO USAR ---------- */
+function daysBetween(dateStr1, dateStr2){
+  const p1 = dateStr1.split("-"), p2 = dateStr2.split("-");
+  const d1 = new Date(parseInt(p1[0]), parseInt(p1[1])-1, parseInt(p1[2]));
+  const d2 = new Date(parseInt(p2[0]), parseInt(p2[1])-1, parseInt(p2[2]));
+  return Math.round((d2 - d1) / (1000*60*60*24));
+}
+function renderBestCard(){
+  const purchaseDate = document.getElementById('bcDate').value;
+  const tbody = document.getElementById('bcRows');
+  if(!purchaseDate){ tbody.innerHTML = ''; return; }
+  const entries = Object.values(cardSettingsCache);
+  if(entries.length === 0){
+    tbody.innerHTML = '<tr><td colspan="3" class="empty">Nenhum cartão cadastrado ainda. Cadastre em "Gerenciar Cartões".</td></tr>';
+    return;
+  }
+  const results = entries.map(c=>{
+    const dueDate = computeCardPaymentDate(purchaseDate, c.closingDay, c.dueDay);
+    const prazo = daysBetween(purchaseDate, dueDate);
+    return {name: c.name, dueDate, prazo};
+  });
+  results.sort((a,b)=> b.prazo - a.prazo);
+  tbody.innerHTML = results.map((r,i)=>{
+    const highlight = i===0 ? 'background:#EAF3EC;font-weight:700;' : '';
+    return '<tr style="'+highlight+'">'+
+      '<td>'+(i===0?'⭐ ':'')+r.name+'</td>'+
+      '<td class="datecell">'+fmtDateShort(r.dueDate)+'</td>'+
+      '<td class="valor">'+r.prazo+' dias</td>'+
+    '</tr>';
+  }).join('');
+}
+document.getElementById('btnBestCard').addEventListener('click', ()=>{
+  if(!document.getElementById('bcDate').value){
+    document.getElementById('bcDate').value = new Date().toISOString().slice(0,10);
+  }
+  renderBestCard();
+  document.getElementById('bestCardOverlay').style.display = 'flex';
+});
+document.getElementById('bestCardClose').addEventListener('click', ()=>{
+  document.getElementById('bestCardOverlay').style.display = 'none';
+});
+document.getElementById('bcDate').addEventListener('change', renderBestCard);
+
 document.getElementById('btnCards').addEventListener('click', openCardsManager);
 document.getElementById('cardsClose').addEventListener('click', ()=>{
   document.getElementById('cardsOverlay').style.display = 'none';
@@ -793,6 +965,9 @@ function startListening(){
       expenses.push(d);
     });
     render();
+    if(document.getElementById('corriqueirosOverlay').style.display === 'flex'){
+      renderCorriqueiros();
+    }
   }, err=>{
     console.error('Erro ao sincronizar', err);
   });
@@ -926,6 +1101,7 @@ document.getElementById('btnAdd').addEventListener('click', async ()=>{
         installmentNumber: i+1, installmentsTotal: count,
         isInstallmentGroup: isInstallmentGroup,
         recurring: isRecurring, recurringType: isRecurring ? recType : null,
+        confirmed: isRecurring ? false : true,
         createdAt: Date.now()
       });
     }
@@ -998,10 +1174,12 @@ document.getElementById('btnBackup').addEventListener('click', async ()=>{
   try{
     const expSnap = await expensesRef.get();
     const cardSnap = await cardSettingsRef.get();
+    const catSnap = await categoriesRef.get();
     const backup = {
       exportedAt: new Date().toISOString(),
       expenses: expSnap.docs.map(d=>({id:d.id, data:d.data()})),
-      cardSettings: cardSnap.docs.map(d=>({id:d.id, data:d.data()}))
+      cardSettings: cardSnap.docs.map(d=>({id:d.id, data:d.data()})),
+      categories: catSnap.docs.map(d=>({id:d.id, data:d.data()}))
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
@@ -1024,7 +1202,7 @@ document.getElementById('btnRestore').addEventListener('click', ()=>{
 document.getElementById('restoreFileInput').addEventListener('change', async (ev)=>{
   const file = ev.target.files[0];
   if(!file) return;
-  if(!confirm('Restaurar este backup vai adicionar/sobrescrever os lançamentos e cartões contidos no arquivo. Continuar?')) {
+  if(!confirm('Restaurar este backup vai adicionar/sobrescrever os lançamentos, cartões e categorias contidos no arquivo. Continuar?')) {
     ev.target.value = '';
     return;
   }
@@ -1044,33 +1222,40 @@ document.getElementById('restoreFileInput').addEventListener('change', async (ev
       cardItems.slice(i,i+450).forEach(item=> batch.set(cardSettingsRef.doc(item.id), item.data));
       await batch.commit();
     }
-    alert('Backup restaurado com sucesso! ('+expItems.length+' gastos, '+cardItems.length+' cartões)');
+    const catItems = backup.categories||[];
+    for(let i=0;i<catItems.length;i+=450){
+      const batch = db.batch();
+      catItems.slice(i,i+450).forEach(item=> batch.set(categoriesRef.doc(item.id), item.data));
+      await batch.commit();
+    }
+    alert('Backup restaurado com sucesso! ('+expItems.length+' gastos, '+cardItems.length+' cartões, '+catItems.length+' categorias)');
   }catch(err){
     alert('Erro ao restaurar backup: '+err.message);
   }
   ev.target.value = '';
 });
 
+function isPendingRecurring(e){ return e.recurring && e.confirmed === false; }
 function purchaseContribution(e){ return e.isInstallmentGroup ? (e.installmentNumber===1 ? e.totalAmount : 0) : e.amount; }
 
 function render(){
   document.getElementById('monthName').textContent = monthLabel(viewDate);
   const vKey = toKey(viewDate);
 
-  const purchaseMonthEntries = expenses.filter(e=>e.purchaseDate.slice(0,7)===vKey);
+  const purchaseMonthEntries = expenses.filter(e=>e.purchaseDate.slice(0,7)===vKey && !isPendingRecurring(e));
   const purchaseTotal = purchaseMonthEntries.reduce((s,e)=>s+purchaseContribution(e),0);
   document.getElementById('purchaseTotal').textContent = fmtMoney(purchaseTotal);
   currentDetailLists.compra = purchaseMonthEntries.filter(e=>!e.isInstallmentGroup || e.installmentNumber===1)
     .map(e=>({date:e.purchaseDate, category:e.category, establishment:e.establishment, paymentMethod:e.paymentMethod, cardName:e.cardName, amount:purchaseContribution(e)}));
 
-  const paymentMonthEntries = expenses.filter(e=>e.date.slice(0,7)===vKey);
+  const paymentMonthEntries = expenses.filter(e=>e.date.slice(0,7)===vKey && !isPendingRecurring(e));
   const paymentTotal = paymentMonthEntries.reduce((s,e)=>s+e.amount,0);
   document.getElementById('paymentTotal').textContent = fmtMoney(paymentTotal);
   currentDetailLists.pagamento = paymentMonthEntries.map(e=>({date:e.date, category:e.category, establishment:e.establishment, paymentMethod:e.paymentMethod, cardName:e.cardName, amount:e.amount}));
 
   const nextViewDate = new Date(viewDate); nextViewDate.setMonth(nextViewDate.getMonth()+1);
   const nextKey = toKey(nextViewDate);
-  const nextMonthEntries = expenses.filter(e=>e.date.slice(0,7)===nextKey);
+  const nextMonthEntries = expenses.filter(e=>e.date.slice(0,7)===nextKey && !isPendingRecurring(e));
   const nextMonthTotal = nextMonthEntries.reduce((s,e)=>s+e.amount,0);
   document.getElementById('nextMonthTotal').textContent = fmtMoney(nextMonthTotal);
   currentDetailLists.proximo = nextMonthEntries.map(e=>({date:e.date, category:e.category, establishment:e.establishment, paymentMethod:e.paymentMethod, cardName:e.cardName, amount:e.amount}));
